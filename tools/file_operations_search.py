@@ -4,6 +4,7 @@
 (no I/O).
 """
 
+import contextlib
 import os
 import posixpath
 import re
@@ -354,6 +355,11 @@ class SearchMixin:
                 start_new_session=True)
         except OSError as exc:
             return ExecuteResult(stdout=f"rg: {exc}", exit_code=2)
+        with contextlib.suppress(ProcessLookupError):
+            # Fallback pgid for _kill_process_group_posix if rg has already exited by the
+            # time we try to kill it (getpgid on a dead pid raises ProcessLookupError) —
+            # mirrors the bash-exec spawn path in tools/environments/local.py.
+            proc._hermes_pgid = os.getpgid(proc.pid)
 
         # Drain on a thread so a silent rg (huge tree, no hits yet) cannot pin the
         # caller past the deadline or past a /stop; the waiter below owns both.
