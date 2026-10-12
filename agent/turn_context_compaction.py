@@ -168,7 +168,15 @@ def _idle_compaction(
         agent, messages, out.active_system_prompt or ""
     )
     # Don't summarise a thread already below the post-compression target size.
-    _idle_floor = int(_compressor.threshold_tokens * _compressor.summary_target_ratio)
+    # ``summary_target_ratio`` is a built-in ContextCompressor attribute and is NOT part
+    # of the external ContextEngine contract (#nachos crash: 'NachosContextEngine' object
+    # has no attribute 'summary_target_ratio'). Guard it the same way the other call site
+    # in conversation_compression.py already does, falling back to the built-in
+    # compressor's own default ratio (0.20) so external engines still get a sane floor.
+    _summary_ratio = getattr(_compressor, "summary_target_ratio", None)
+    if not isinstance(_summary_ratio, (int, float)):
+        _summary_ratio = 0.20
+    _idle_floor = int(_compressor.threshold_tokens * _summary_ratio)
     _idle_cooldown = getattr(
         _compressor, "get_active_compression_failure_cooldown", lambda: None
     )()

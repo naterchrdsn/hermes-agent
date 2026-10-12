@@ -244,5 +244,41 @@ def test_idle_compaction_respects_anti_thrash_breaker(tmp_path: Path) -> None:
     assert len(ctx.messages) == len(_history()) + 1
 
 
+def test_idle_compaction_survives_external_engine_missing_summary_ratio(
+    tmp_path: Path,
+) -> None:
+    """External ContextEngine plugins (e.g. Nachos) must not crash the idle
+    pre-check.
+
+    ``summary_target_ratio`` is a built-in ``ContextCompressor`` attribute,
+    not part of the ``ContextEngine`` ABC contract. A session using an
+    external engine (``context.engine: <plugin>`` in config.yaml) previously
+    hit ``AttributeError: '<Engine>' object has no attribute
+    'summary_target_ratio'`` on every idle-triggered compaction check,
+    because the floor computation in ``turn_context_compaction.py`` read the
+    attribute directly instead of via ``getattr(..., None)`` like its sibling
+    call site in ``conversation_compression.py``. Reproduce by deleting the
+    attribute off the mocked compressor (MagicMock auto-creates any attribute
+    you don't explicitly remove, so this is the only way to simulate
+    "genuinely missing" against the mock — same technique the loud-status
+    test above uses for ``get_automatic_compaction_status_message``).
+    """
+    db = SessionDB(db_path=tmp_path / "state.db")
+    sid = "IDLE_EXTERNAL_ENGINE"
+    db.create_session(sid, source="cli")
+    agent = _prep_idle_agent(db, sid)
+    del agent.context_compressor.summary_target_ratio
+    assert not hasattr(agent.context_compressor, "summary_target_ratio")
+
+    # Must not raise AttributeError.
+    ctx = _run_prologue(agent, _history())
+
+    # Compression actually ran (proves the idle floor computed without
+    # blowing up on the missing attribute) and produced a valid turn context.
+    agent.context_compressor.compress.assert_called_once()
+    assert ctx.messages
+    assert ctx.current_turn_user_idx == len(ctx.messages) - 1
+
+
 
 
