@@ -813,9 +813,17 @@ def build_turn_context(
             )
             # Post-compression target size: don't summarise a thread already
             # below what compaction would reduce it to.
-            _idle_floor = int(
-                _compressor.threshold_tokens * _compressor.summary_target_ratio
-            )
+            # ``summary_target_ratio`` is a built-in ContextCompressor attribute
+            # and is NOT part of the external ContextEngine contract (#nachos
+            # crash: 'NachosContextEngine' object has no attribute
+            # 'summary_target_ratio'). Guard it the same way the other call
+            # sites in conversation_compression.py already do, falling back to
+            # the built-in compressor's own default ratio (0.20) so external
+            # engines still get a sane idle-compaction floor.
+            _summary_ratio = getattr(_compressor, "summary_target_ratio", None)
+            if not isinstance(_summary_ratio, (int, float)):
+                _summary_ratio = 0.20
+            _idle_floor = int(_compressor.threshold_tokens * _summary_ratio)
             _idle_cooldown = getattr(
                 _compressor, "get_active_compression_failure_cooldown", lambda: None
             )()
